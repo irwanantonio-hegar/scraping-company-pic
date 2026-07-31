@@ -40,7 +40,15 @@ If interrupted (Ctrl+C), rerun the same command without `--no-resume` to continu
 
 ## Validation
 
-A smoke run on 3 well-known companies produces ≥1 row with PIC Name populated. See `tests/fixtures/sample_real_companies.csv`.
+A smoke run on 3 well-known companies (`tests/fixtures/sample_real_companies.csv`) — observed:
+
+```
+[1/3] PT Unilever Indonesia    — failed
+[2/3] PT Astra International   — partial (Google)
+[3/3] PT Pertamina (Persero)   — partial (Google, LinkedIn)
+```
+
+Output CSV (`/tmp/e2e_out.csv`) has 8 columns (1 original + 7 new), with at least Phone, PIC Name, and Email filled where Google succeeded. PT Unilever often fails because Google headless requests for that query trigger captcha. For higher hit rates, run `--headful` and consider adding residential proxy support (currently Camoufox fingerprint rotation only).
 
 ## Troubleshooting
 

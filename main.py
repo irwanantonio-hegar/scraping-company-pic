@@ -43,6 +43,9 @@ async def run(args: argparse.Namespace) -> int:
     state = State(state_path)
     if args.no_resume:
         state.clear()
+        # Also truncate output so previous-run data doesn't mix with the new run
+        if out_path.exists():
+            out_path.unlink()
 
     df = pd.read_csv(in_path, dtype=str, keep_default_na=False)
     rows = df.to_dict(orient="records")
