@@ -137,10 +137,10 @@ async def process_row(
 
     if sources is None:
         sources = {
-            "oss": oss_mod.search_oss,
-            "website": website_mod.visit_website,
-            "google": google_mod.search_google,
             "linkedin": google_mod.search_linkedin,
+            "google": google_mod.search_google,
+            "website": website_mod.visit_website,
+            # "oss": oss_mod.search_oss,
         }
 
     company = source_row.get("Nama Perusahaan", "")
