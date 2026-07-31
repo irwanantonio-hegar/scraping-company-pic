@@ -140,18 +140,33 @@ async def process_row(
             "linkedin": google_mod.search_linkedin,
             "google": google_mod.search_google,
             "website": website_mod.visit_website,
-            # "oss": oss_mod.search_oss,
+            "oss": oss_mod.search_oss,
         }
 
     company = source_row.get("Nama Perusahaan", "")
     parts: list[PartialRow] = []
-
+    # Source D: LinkedIn fallback — only if still no PIC
+    has_pic = any(p.pic_candidates for p in parts)
+    if not has_pic:
+        try:
+            parts.append(await sources["linkedin"](context, company))
+        except Exception as e:
+            log.warning("LinkedIn failed for %s: %s", company, e)
+            
+     # Source C: Google (with job-title keywords) — skip if a PIC already found
+    oss_had_pic = any(p.pic_candidates for p in parts)
+    if not oss_had_pic:
+        try:
+            g = await sources["google"](context, company)
+            parts.append(g)
+        except Exception as e:
+            log.warning("Google failed for %s: %s", company, e)
     # Source A: OSS
-    try:
-        r = await sources["oss"](context, company)
-        parts.append(r)
-    except Exception as e:
-        log.warning("OSS failed for %s: %s", company, e)
+    # try:
+    #     r = await sources["oss"](context, company)
+    #     parts.append(r)
+    # except Exception as e:
+    #     log.warning("OSS failed for %s: %s", company, e)
 
     # Decide website URL: from OSS if present
     website_url = None
@@ -167,22 +182,6 @@ async def process_row(
         except Exception as e:
             log.warning("Website failed for %s: %s", company, e)
 
-    # Source C: Google (with job-title keywords) — skip if a PIC already found
-    oss_had_pic = any(p.pic_candidates for p in parts)
-    if not oss_had_pic:
-        try:
-            g = await sources["google"](context, company)
-            parts.append(g)
-        except Exception as e:
-            log.warning("Google failed for %s: %s", company, e)
-
-    # Source D: LinkedIn fallback — only if still no PIC
-    has_pic = any(p.pic_candidates for p in parts)
-    if not has_pic:
-        try:
-            parts.append(await sources["linkedin"](context, company))
-        except Exception as e:
-            log.warning("LinkedIn failed for %s: %s", company, e)
 
     final = merge_rows(parts)
 
