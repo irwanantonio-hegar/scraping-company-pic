@@ -1,9 +1,13 @@
 """Per-row pipeline orchestration and merge logic."""
 from __future__ import annotations
+import asyncio
+import logging
+import random
 from dataclasses import dataclass, field
-from typing import Optional
+from typing import Awaitable, Callable, Optional
 
 from scraper.parsers import PICMatch
+from scraper.state import RowState, State
 
 
 # Output column order — appended after input columns
@@ -114,3 +118,84 @@ def final_to_output_dict(final: FinalRow, source_row: dict) -> dict:
     out["Website"] = final.website or ""
     out["Sumber data"] = "; ".join(final.sources) if final.sources else "—"
     return out
+
+
+log = logging.getLogger(__name__)
+
+
+async def process_row(
+    context,
+    state: State,
+    index: int,
+    source_row: dict,
+    sources: dict[str, Callable[..., Awaitable[PartialRow]]] | None = None,
+) -> FinalRow:
+    """Run sources in priority order and merge. Updates state at the end."""
+    from scraper.sources import oss as oss_mod
+    from scraper.sources import google as google_mod
+    from scraper.sources import website as website_mod
+
+    if sources is None:
+        sources = {
+            "oss": oss_mod.search_oss,
+            "website": website_mod.visit_website,
+            "google": google_mod.search_google,
+            "linkedin": google_mod.search_linkedin,
+        }
+
+    company = source_row.get("Nama Perusahaan", "")
+    parts: list[PartialRow] = []
+
+    # Source A: OSS
+    try:
+        r = await sources["oss"](context, company)
+        parts.append(r)
+    except Exception as e:
+        log.warning("OSS failed for %s: %s", company, e)
+
+    # Decide website URL: from OSS if present
+    website_url = None
+    for p in parts:
+        if p.website:
+            website_url = p.website
+            break
+
+    # Source B: Website (only if URL known)
+    if website_url:
+        try:
+            parts.append(await sources["website"](context, website_url, company))
+        except Exception as e:
+            log.warning("Website failed for %s: %s", company, e)
+
+    # Source C: Google (with job-title keywords) — skip if a PIC already found
+    oss_had_pic = any(p.pic_candidates for p in parts)
+    if not oss_had_pic:
+        try:
+            g = await sources["google"](context, company)
+            parts.append(g)
+        except Exception as e:
+            log.warning("Google failed for %s: %s", company, e)
+
+    # Source D: LinkedIn fallback — only if still no PIC
+    has_pic = any(p.pic_candidates for p in parts)
+    if not has_pic:
+        try:
+            parts.append(await sources["linkedin"](context, company))
+        except Exception as e:
+            log.warning("LinkedIn failed for %s: %s", company, e)
+
+    final = merge_rows(parts)
+
+    # Update state
+    status = "done" if (final.filled_fields or final.pic_name) else "failed"
+    state.update(RowState(
+        index=index,
+        company=company,
+        status=status,
+        sources=final.sources,
+        fields_filled=final.filled_fields,
+    ))
+
+    # Random delay to look human
+    await asyncio.sleep(random.uniform(2.0, 8.0))
+    return final
