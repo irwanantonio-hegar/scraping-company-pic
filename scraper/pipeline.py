@@ -130,8 +130,13 @@ async def process_row(
     source_row: dict,
     sources: dict[str, Callable[..., Awaitable[PartialRow]]] | None = None,
 ) -> FinalRow:
-    """Run sources in priority order and merge. Updates state at the end."""
-    from scraper.sources import oss as oss_mod
+    """Run sources in priority order and merge. Updates state at the end.
+
+    Source order:
+      1. LinkedIn dork  (site:linkedin.com search for HSE/Enviro/GM)
+      2. Google search  (job-title keywords across the open web)
+      3. Direct website (visit /about, /team, /contact for the URL discovered above)
+    """
     from scraper.sources import google as google_mod
     from scraper.sources import website as website_mod
 
@@ -140,48 +145,30 @@ async def process_row(
             "linkedin": google_mod.search_linkedin,
             "google": google_mod.search_google,
             "website": website_mod.visit_website,
-            "oss": oss_mod.search_oss,
         }
 
     company = source_row.get("Nama Perusahaan", "")
     parts: list[PartialRow] = []
-    # Source D: LinkedIn fallback — only if still no PIC
-    has_pic = any(p.pic_candidates for p in parts)
-    if not has_pic:
-        try:
-            parts.append(await sources["linkedin"](context, company))
-        except Exception as e:
-            log.warning("LinkedIn failed for %s: %s", company, e)
-            
-     # Source C: Google (with job-title keywords) — skip if a PIC already found
-    oss_had_pic = any(p.pic_candidates for p in parts)
-    if not oss_had_pic:
-        try:
-            g = await sources["google"](context, company)
-            parts.append(g)
-        except Exception as e:
-            log.warning("Google failed for %s: %s", company, e)
-    # Source A: OSS
-    # try:
-    #     r = await sources["oss"](context, company)
-    #     parts.append(r)
-    # except Exception as e:
-    #     log.warning("OSS failed for %s: %s", company, e)
 
-    # Decide website URL: from OSS if present
-    website_url = None
-    for p in parts:
-        if p.website:
-            website_url = p.website
-            break
+    # Source 1: LinkedIn dork — highest priority for PIC name + role
+    try:
+        parts.append(await sources["linkedin"](context, company))
+    except Exception as e:
+        log.warning("LinkedIn failed for %s: %s", company, e)
 
-    # Source B: Website (only if URL known)
+    # Source 2: Google search — broadens net for phone/email/website
+    try:
+        parts.append(await sources["google"](context, company))
+    except Exception as e:
+        log.warning("Google failed for %s: %s", company, e)
+
+    # Source 3: Direct website — only if LinkedIn or Google surfaced a URL
+    website_url = next((p.website for p in parts if p.website), None)
     if website_url:
         try:
             parts.append(await sources["website"](context, website_url, company))
         except Exception as e:
             log.warning("Website failed for %s: %s", company, e)
-
 
     final = merge_rows(parts)
 
