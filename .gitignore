@@ -9,3 +9,4 @@ venv/
 output/*.csv
 !tests/fixtures/sample_input.csv
 .DS_Store
+*.csv
